@@ -1,0 +1,16 @@
+{
+  "HStack": {
+    "input": {
+      "DataFrameScan": {
+        "schema": {"fields": {"a": "Int64", "b": "Int64"}, "metadata": null}
+      }
+    },
+    "exprs": [
+      {"Alias": [
+        {"BinaryExpr": {"left": {"Column": "a"}, "op": "Plus", "right": {"Column": "b"}}},
+        "sum_ab"
+      ]}
+    ],
+    "options": {}
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "HStack": {
+    "input": {
+      "DataFrameScan": {
+        "schema": {"fields": {"b": "String"}, "metadata": null}
+      }
+    },
+    "exprs": [
+      {"Alias": [
+        {"AnonymousFunction": {
+          "input": [{"Column": "b"}],
+          "function": [80, 76, 80, 89],
+          "options": {"check_lengths": true, "flags": "ROW_SEPARABLE"}
+        }},
+        "b_mapped"
+      ]}
+    ],
+    "options": {}
+  }
+}

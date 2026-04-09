@@ -1,0 +1,11 @@
+{
+  "Select": {
+    "expr": [{"Column": "a"}, {"Column": "b"}],
+    "input": {
+      "DataFrameScan": {
+        "schema": {"fields": {"a": "Int64", "b": "String"}, "metadata": null}
+      }
+    },
+    "options": {}
+  }
+}

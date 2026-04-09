@@ -8,3 +8,12 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Runtime metadata output (keep directory structure via .gitkeep)
+metadata/raw/*
+metadata/schemas/*
+metadata/mappings/*
+!metadata/raw/.gitkeep
+!metadata/schemas/.gitkeep
+!metadata/mappings/.gitkeep
+!metadata/identities.yaml

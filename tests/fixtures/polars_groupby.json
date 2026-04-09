@@ -1,0 +1,17 @@
+{
+  "GroupBy": {
+    "input": {
+      "DataFrameScan": {
+        "schema": {"fields": {"dept": "String", "salary": "Float64"}, "metadata": null}
+      }
+    },
+    "keys": [{"Column": "dept"}],
+    "aggs": [
+      {"Alias": [{"Agg": {"Sum": {"Column": "salary"}}}, "total_salary"]}
+    ],
+    "predicates": [],
+    "maintain_order": false,
+    "options": {},
+    "apply": null
+  }
+}

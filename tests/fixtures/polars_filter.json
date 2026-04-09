@@ -1,0 +1,16 @@
+{
+  "Filter": {
+    "input": {
+      "DataFrameScan": {
+        "schema": {"fields": {"age": "Int64", "name": "String"}, "metadata": null}
+      }
+    },
+    "predicate": {
+      "BinaryExpr": {
+        "left": {"Column": "age"},
+        "op": "Gt",
+        "right": {"Literal": {"Dyn": {"Int": 30}}}
+      }
+    }
+  }
+}

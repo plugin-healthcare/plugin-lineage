@@ -1,0 +1,18 @@
+{
+  "Join": {
+    "input_left": {
+      "DataFrameScan": {
+        "schema": {"fields": {"org_id": "Int64", "user_id": "Int64", "val": "Int64"}, "metadata": null}
+      }
+    },
+    "input_right": {
+      "DataFrameScan": {
+        "schema": {"fields": {"org_id": "Int64", "user_id": "Int64", "score": "Float64"}, "metadata": null}
+      }
+    },
+    "left_on":  [{"Column": "org_id"}, {"Column": "user_id"}],
+    "right_on": [{"Column": "org_id"}, {"Column": "user_id"}],
+    "predicates": [],
+    "options": {"args": {"how": "Inner"}}
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "Select": {
+    "expr": [{"Column": "patient_id"}, {"Column": "diagnosis"}, {"Column": "age_doubled"}],
+    "input": {
+      "HStack": {
+        "exprs": [
+          {"Alias": [
+            {"BinaryExpr": {
+              "left": {"Column": "age"},
+              "op": "Multiply",
+              "right": {"Literal": {"Dyn": {"Int": 2}}}
+            }},
+            "age_doubled"
+          ]}
+        ],
+        "input": {
+          "Filter": {
+            "predicate": {
+              "BinaryExpr": {
+                "left": {"Column": "age"},
+                "op": "GtEq",
+                "right": {"Literal": {"Dyn": {"Int": 30}}}
+              }
+            },
+            "input": {
+              "DataFrameScan": {
+                "schema": {
+                  "fields": {"patient_id": "Int64", "age": "Int64", "diagnosis": "String"},
+                  "metadata": null
+                }
+              }
+            }
+          }
+        },
+        "options": {}
+      }
+    },
+    "options": {}
+  }
+}

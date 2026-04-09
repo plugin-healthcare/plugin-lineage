@@ -1,0 +1,22 @@
+{
+  "Join": {
+    "input_left": {
+      "DataFrameScan": {
+        "schema": {"fields": {"id": "Int64", "name": "String"}, "metadata": null}
+      }
+    },
+    "input_right": {
+      "DataFrameScan": {
+        "schema": {"fields": {"user_id": "Int64", "score": "Float64"}, "metadata": null}
+      }
+    },
+    "left_on":  [{"Column": "id"}],
+    "right_on": [{"Column": "user_id"}],
+    "predicates": [],
+    "options": {
+      "allow_parallel": true,
+      "force_parallel": false,
+      "args": {"how": "Left", "suffix": "_right", "coalesce": "JoinSpecific", "nulls_equal": false}
+    }
+  }
+}
