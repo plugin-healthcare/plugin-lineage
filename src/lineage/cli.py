@@ -14,20 +14,17 @@ from __future__ import annotations
 import json
 import pathlib
 import subprocess
-from typing import Optional
-
 import pyarrow as pa
 import questionary
 import typer
 from linkml_map.datamodel.transformer_model import TransformationSpecification
-from linkml_runtime.dumpers import YAMLDumper
 from linkml_runtime.linkml_model import SchemaDefinition
 from linkml_runtime.loaders import YAMLLoader
 from rich.console import Console
 from rich.table import Table
 from rich.tree import Tree
 
-from lineage.models import ColumnLineage
+from lineage.models import ColumnLineage, POLARS_NODE_TYPES, arrow_type_from_string
 from lineage.persistence.identity_registry import IdentityRegistry
 from lineage.persistence.mapping_writer import (
     write_mapping_to_file,
@@ -49,19 +46,7 @@ console = Console()
 # Constants
 # ---------------------------------------------------------------------------
 
-_POLARS_NODE_TYPES = {
-    "Select",
-    "HStack",
-    "Filter",
-    "Join",
-    "DataFrameScan",
-    "Scan",
-    "IR",
-    "MapFunction",
-    "GroupBy",
-    "Sort",
-    "Slice",
-}
+# _POLARS_NODE_TYPES is imported from lineage.models (single source of truth)
 
 _DEFAULT_RAW = pathlib.Path("metadata/raw")
 _DEFAULT_SCHEMAS = pathlib.Path("metadata/schemas")
@@ -80,7 +65,7 @@ def _detect_plan_type(content: str, filename: str) -> str:
         return "sql"
     try:
         data = json.loads(content)
-        if isinstance(data, dict) and next(iter(data)) in _POLARS_NODE_TYPES:
+        if isinstance(data, dict) and any(k in POLARS_NODE_TYPES for k in data):
             return "polars"
     except (json.JSONDecodeError, StopIteration, ValueError):
         pass
@@ -91,7 +76,7 @@ def _load_arrow_schema(schema_path: pathlib.Path) -> pa.Schema:
     """Load an Arrow schema from a ``{col: type_str}`` JSON file."""
     schema_dict: dict[str, str] = json.loads(schema_path.read_text())
     fields = [
-        pa.field(name, pa.lib.ensure_type(type_str))
+        pa.field(name, arrow_type_from_string(type_str))
         for name, type_str in schema_dict.items()
     ]
     return pa.schema(fields)

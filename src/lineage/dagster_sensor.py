@@ -17,7 +17,8 @@ process_materialization(mat, raw_dir) -> pa.Schema | None
 
 build_lineage_sensor(raw_dir) -> SensorDefinition
     Dagster sensor factory. Returns a ``@sensor`` definition that calls
-    ``process_materialization`` for every ``AssetMaterialization`` event.
+    ``process_materialization`` for every new ``AssetMaterialization`` event,
+    using a cursor to avoid re-processing historical records on each tick.
 """
 
 from __future__ import annotations
@@ -30,25 +31,9 @@ from typing import Any
 
 import pyarrow as pa
 
+from lineage.models import POLARS_NODE_TYPES, arrow_type_from_string
+
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constants (mirrors cli.py)
-# ---------------------------------------------------------------------------
-
-_POLARS_NODE_TYPES = {
-    "Select",
-    "HStack",
-    "Filter",
-    "Join",
-    "DataFrameScan",
-    "Scan",
-    "IR",
-    "MapFunction",
-    "GroupBy",
-    "Sort",
-    "Slice",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +55,7 @@ def _deserialize_schema(value: str) -> pa.Schema:
         if isinstance(data, dict):
             fields = []
             for name, type_str in data.items():
-                fields.append(pa.field(name, pa.lib.ensure_type(type_str)))
+                fields.append(pa.field(name, arrow_type_from_string(type_str)))
             return pa.schema(fields)
     except Exception:
         pass
@@ -82,12 +67,17 @@ def _deserialize_schema(value: str) -> pa.Schema:
 
 
 def _detect_plan_type(content: str) -> str:
-    """Return ``'sql'`` or ``'polars'`` based on content heuristic."""
+    """Return ``'sql'`` or ``'polars'`` based on content heuristic.
+
+    Parses the content as JSON and checks whether *any* top-level key matches
+    a known Polars IR node type.  Checking any key (rather than only the first)
+    avoids false negatives when the dict ordering places non-node keys first.
+    """
     try:
         data = json.loads(content)
-        if isinstance(data, dict) and next(iter(data)) in _POLARS_NODE_TYPES:
+        if isinstance(data, dict) and any(k in POLARS_NODE_TYPES for k in data):
             return "polars"
-    except (json.JSONDecodeError, StopIteration, ValueError):
+    except (json.JSONDecodeError, StopIteration):
         pass
     return "sql"
 
@@ -116,6 +106,13 @@ def process_materialization(
     pa.Schema | None
         The reconstructed Arrow output schema, or ``None`` if required
         metadata keys are missing.
+
+    Notes
+    -----
+    If a plan file for the same asset already exists and its contents differ
+    from the new plan, a warning is logged before overwriting.  This surfaces
+    potential naming collisions (e.g. two assets whose key paths join to the
+    same string).
     """
     asset_name = "_".join(mat.asset_key.path)
 
@@ -155,8 +152,18 @@ def process_materialization(
     # Ensure output directory exists
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write plan file
+    # Write plan file — warn if an existing file would be overwritten with
+    # different content (potential asset-name collision or stale data).
     plan_file = raw_dir / f"{asset_name}{ext}"
+    if plan_file.exists():
+        existing = plan_file.read_text(encoding="utf-8")
+        if existing != plan_content:
+            logger.warning(
+                "Asset '%s': overwriting existing plan file '%s' with different content. "
+                "Check for asset-key naming collisions.",
+                asset_name,
+                plan_file.name,
+            )
     plan_file.write_text(plan_content, encoding="utf-8")
 
     # Write schema as {col: type_str} JSON
@@ -183,6 +190,11 @@ def build_lineage_sensor(
 ) -> Any:
     """Return a Dagster ``@sensor`` that calls ``process_materialization``.
 
+    The sensor uses a cursor to track the last-processed event storage ID so
+    that only *new* ``AssetMaterialization`` events are processed on each tick.
+    This prevents the unbounded historical scan that would occur if
+    ``get_event_records()`` were called without filtering on every poll.
+
     Import is deferred so that the module can be imported in environments
     where ``dagster`` is not installed (e.g. during unit tests).
 
@@ -192,7 +204,13 @@ def build_lineage_sensor(
         Directory where raw plan files are written.
     """
     try:
-        from dagster import RunRequest, sensor, SensorEvaluationContext
+        from dagster import (
+            DagsterEventType,
+            EventRecordsFilter,
+            RunRequest,
+            SkipReason,
+            sensor,
+        )
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "dagster is required to use build_lineage_sensor(). "
@@ -200,10 +218,28 @@ def build_lineage_sensor(
         ) from exc
 
     @sensor(name="lineage_sensor", minimum_interval_seconds=30)
-    def _lineage_sensor(context: SensorEvaluationContext):
-        for event in context.instance.get_event_records():
-            mat = event.asset_materialization
+    def _lineage_sensor(context):  # type: ignore[no-untyped-def]
+        after_cursor = context.cursor
+
+        records = list(
+            context.instance.get_event_records(
+                EventRecordsFilter(event_type=DagsterEventType.ASSET_MATERIALIZATION),
+                after_cursor=after_cursor,
+            )
+        )
+
+        if not records:
+            yield SkipReason("No new asset materializations since last tick.")
+            return
+
+        for record in records:
+            mat = record.asset_materialization
             if mat is not None:
                 process_materialization(mat, raw_dir=raw_dir)
+
+        # Advance the cursor to the last record processed so we don't
+        # re-process the same events on the next sensor tick.
+        context.update_cursor(str(records[-1].storage_id))
+        yield RunRequest(run_key=str(records[-1].storage_id))
 
     return _lineage_sensor

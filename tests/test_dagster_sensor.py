@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pyarrow as pa
 import pytest
 
-from lineage.dagster_sensor import process_materialization
+from lineage.dagster_sensor import build_lineage_sensor, process_materialization
 
 
 # ---------------------------------------------------------------------------
@@ -235,5 +235,98 @@ class TestSensorSchemaDeserialization:
         result = process_materialization(mat, raw_dir=tmp_path)
         assert result is not None
         # Int64 / Float64 (Polars-style) round-trip — types are equivalent
-        assert result.field("id").type in (pa.int64(),)
-        assert result.field("amount").type in (pa.float64(),)
+        assert result.field("id").type == pa.int64()
+        assert result.field("amount").type == pa.float64()
+
+
+# ---------------------------------------------------------------------------
+# Tests for overwrite warning
+# ---------------------------------------------------------------------------
+
+
+class TestSensorOverwriteWarning:
+    def test_warns_on_content_change(self, tmp_path, caplog):
+        """A warning is logged when an existing plan file would be overwritten
+        with different content (potential asset-key collision or re-run)."""
+        mat = _make_mat(
+            ["my_asset"],
+            {
+                "lineage_plan": SIMPLE_SQL,
+                "lineage_schema": _schema_json(SIMPLE_SCHEMA),
+            },
+        )
+        # First write — no warning expected
+        process_materialization(mat, raw_dir=tmp_path)
+
+        # Second write with different plan content
+        mat2 = _make_mat(
+            ["my_asset"],
+            {
+                "lineage_plan": "SELECT id FROM users",
+                "lineage_schema": _schema_json(SIMPLE_SCHEMA),
+            },
+        )
+        with caplog.at_level(logging.WARNING, logger="lineage.dagster_sensor"):
+            process_materialization(mat2, raw_dir=tmp_path)
+
+        assert "overwriting" in caplog.text.lower()
+
+    def test_no_warn_on_identical_content(self, tmp_path, caplog):
+        """No warning is emitted when re-writing the exact same plan content."""
+        mat = _make_mat(
+            ["my_asset"],
+            {
+                "lineage_plan": SIMPLE_SQL,
+                "lineage_schema": _schema_json(SIMPLE_SCHEMA),
+            },
+        )
+        process_materialization(mat, raw_dir=tmp_path)
+
+        with caplog.at_level(logging.WARNING, logger="lineage.dagster_sensor"):
+            process_materialization(mat, raw_dir=tmp_path)
+
+        assert "overwriting" not in caplog.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# Smoke tests for build_lineage_sensor factory
+# ---------------------------------------------------------------------------
+
+
+class TestBuildLineageSensorFactory:
+    def test_returns_callable_when_dagster_available(self, tmp_path):
+        """build_lineage_sensor() returns a callable sensor when dagster is importable."""
+        dagster = pytest.importorskip("dagster", reason="dagster not installed")
+        sensor_def = build_lineage_sensor(raw_dir=tmp_path)
+        assert callable(sensor_def), "build_lineage_sensor should return a callable"
+
+    def test_sensor_has_expected_name(self, tmp_path):
+        """The returned sensor is named 'lineage_sensor'."""
+        pytest.importorskip("dagster", reason="dagster not installed")
+        sensor_def = build_lineage_sensor(raw_dir=tmp_path)
+        assert sensor_def.name == "lineage_sensor"
+
+    def test_raises_import_error_when_dagster_missing(self, tmp_path, monkeypatch):
+        """build_lineage_sensor raises ImportError when dagster cannot be imported."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _mock_import(name, *args, **kwargs):
+            if name == "dagster":
+                raise ImportError("No module named 'dagster'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _mock_import)
+
+        # The function body defers the dagster import, so we need a fresh call
+        # that hits the mocked import.  Re-import the module inside the patch.
+        import importlib
+        import lineage.dagster_sensor as ds_module
+
+        importlib.reload(ds_module)
+        with pytest.raises(ImportError, match="dagster is required"):
+            ds_module.build_lineage_sensor(raw_dir=tmp_path)
+
+        # Restore the real module after the test
+        importlib.reload(ds_module)
